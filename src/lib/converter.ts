@@ -34,14 +34,23 @@ export default class PawConverter {
   private readonly requestGroups: MapKeyedWithString<Paw.RequestGroup> = {}
   private readonly envManagers: MapKeyedWithString<EnvironmentManager> = {}
   private readonly parserOptions: SwaggerParser.Options = { ...parserOptions }
+  private readonly rootGroup?: Paw.RequestGroup;
+  private readonly shouldGroupByTags: boolean;
+  private readonly tagGroupDict: Record<string, Paw.RequestGroup> = {};
+  private readonly environmentDomainName?: string;
 
   public filename: string = ''
+  public url?: string
   public apiParser: SwaggerParser
   public groupedRequest: GroupedRequestType[] = []
 
-  constructor(parser: SwaggerParser, name: string, ctx: Paw.Context) {
+  constructor(parser: SwaggerParser, name: string, url: string | undefined, rootGroup: Paw.RequestGroup | undefined, shouldGroupByTags: boolean, environmentDomainName: string | undefined, ctx: Paw.Context) {
     this.context = ctx
     this.filename = name
+    this.url = url
+    this.rootGroup = rootGroup;
+    this.shouldGroupByTags = shouldGroupByTags;
+    this.environmentDomainName = environmentDomainName;
 
     /**
      * the api document data/info can now be accessed from the parser.
@@ -89,7 +98,7 @@ export default class PawConverter {
     const document = this.apiParser.api
     const { title } = document.info
     if (!this.envManagers[title]) {
-      this.envManagers[title] = new EnvironmentManager(this.context, title)
+      this.envManagers[title] = new EnvironmentManager(this.context, this.environmentDomainName || title)
       return this.envManagers[title]
     }
     return this.envManagers[title]
@@ -115,6 +124,11 @@ export default class PawConverter {
     const document = this.apiParser.api
     const { paths } = document
 
+    if (this.shouldGroupByTags) {
+      this.groupedRequest = Object.keys(paths).map(path => ({path}));
+      return this.requestGroups;
+    }
+    
     const groups: CreateRequestGroupType[] = [...Object.keys(paths)]
       .map(group.mapToGroup)
       .filter((item: CreateRequestGroupType) => item !== null)
@@ -124,9 +138,9 @@ export default class PawConverter {
     groups
       .filter((item: CreateRequestGroupType) => item.group.trim() !== '')
       .forEach((item: CreateRequestGroupType) => {
-        this.requestGroups[item.group] = this.context.createRequestGroup(
-          item.group,
-        )
+        const group = this.context.createRequestGroup(item.group)
+        this.rootGroup?.appendChild(group)
+        this.requestGroups[item.group] = group;
       })
 
     this.groupedRequest = groups
@@ -144,7 +158,7 @@ export default class PawConverter {
    * @param {String} group
    * @returns {Object<any>}
    */
-  private createRequestMeta(path: string, group: string): any {
+  private createRequestMeta(path: string, group?: string): any {
     const document = this.apiParser.api as OpenAPIV3.Document
     const operation = document.paths[path] as OpenAPIV3.PathsObject
 
@@ -186,7 +200,7 @@ export default class PawConverter {
       if (requestContext.security) {
         security = requestContext.security
       }
-
+      
       return {
         path,
         group,
@@ -198,6 +212,8 @@ export default class PawConverter {
         responses,
         servers,
         security,
+        operationId: requestContext.operationId,
+        tags: requestContext.tags
       } as any
     })
 
@@ -234,9 +250,7 @@ export default class PawConverter {
       this.setRequestParameters(item.parameters, request)
     }
 
-    if (item.security) {
-      this.setRequestAuth(item.security, request)
-    }
+    this.setRequestAuth(item.security, request)
 
     if (item.responses) {
       request.setHeader('Accept', item.responses[0])
@@ -252,7 +266,20 @@ export default class PawConverter {
 
     request.url = requestURL.fullUrl
 
-    if (item.group.trim() !== '') {
+    this.rootGroup?.appendChild(request);
+    if (this.shouldGroupByTags) {
+      const groupName = item.tags?.[0];
+      if (groupName) {
+        let group = this.tagGroupDict[groupName];
+        if (!group) {
+          group = this.context.createRequestGroup(groupName);
+          this.rootGroup?.appendChild(group);
+          this.tagGroupDict[groupName] = group;
+        }
+        group.appendChild(request);
+      }
+    }
+    else if (item.group.trim() !== '') {
       this.requestGroups[item.group].appendChild(request)
     }
   }
@@ -361,11 +388,12 @@ export default class PawConverter {
   }
 
   private setRequestAuth(
-    securityTypes: OpenAPIV3.SecurityRequirementObject[],
+    securityTypes: OpenAPIV3.SecurityRequirementObject[] | undefined,
     request: Paw.Request,
   ): Paw.Request {
     const envManager = this.getEnviroment()
     const document = this.apiParser.api as OpenAPIV3.Document
+    
     // Because there are no references to refer to
     if (!document.components || !document.components.securitySchemes)
       return request
@@ -374,7 +402,7 @@ export default class PawConverter {
       [key: string]: OpenAPIV3.SecuritySchemeObject
     }
 
-    const security = [...securityTypes]
+    const security = [...(securityTypes || document.security || [])]
       .map(
         (
           item: OpenAPIV3.SecurityRequirementObject,
@@ -416,10 +444,14 @@ export default class PawConverter {
         )
       }
 
-      if (
-        (item.type === 'http' && item.scheme === 'bearer') ||
-        item.type === 'apiKey'
-      ) {
+      if (item.type === 'http' && item.scheme === 'bearer') {
+        request.addHeader(
+          'Authorization',
+          new DynamicString(
+            'Bearer ',
+            this.getEnviroment().getDynamicValue(`${item.bearerFormat || 'Auth'} Token`)
+          )
+        )
       }
     })
 
@@ -443,6 +475,17 @@ export default class PawConverter {
                 true /* only assign if value is empty */,
               )
             },
+          )
+        }
+        if (
+          (!serverObject.url || serverObject.url.startsWith('/')) &&
+          this.url
+        ) {
+          const baseUrlStr = this.url? new URL('.', this.url).href : 'https://echo.paw.cloud'
+          this.getEnviroment().setEnvironmentVariableValue(
+            'Base URL',
+            baseUrlStr.replace(/\/+$/, ''),
+            true,
           )
         }
       })

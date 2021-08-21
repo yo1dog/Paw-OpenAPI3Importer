@@ -100,7 +100,7 @@ export function convertEnvString(
       const requestVariable = request.getVariableByName(match[1])
       if (requestVariable && requestVariable.id) {
         components.push(
-          new DynamicValue('com.luckymarmot.RequestVariableDynamicValue', {
+          new DynamicValue(REQUEST_DYNAMIC_VALUE, {
             variableUUID: requestVariable.id,
           }),
         )

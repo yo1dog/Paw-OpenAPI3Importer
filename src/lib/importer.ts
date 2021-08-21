@@ -5,13 +5,28 @@ import Paw from 'types/paw'
 import PawConverter from './converter'
 import config from '../paw.config'
 
-const { identifier, title, inputs, fileExtensions } = config
+const { identifier, title, fileExtensions } = config
 
 export default class OpenAPIv3Importer implements Paw.Importer {
   public static title = title
-  public static inputs = inputs
   public static identifier = identifier
   public static fileExtensions = [...fileExtensions]
+  public static inputs = [
+    InputField('environmentDomainName', 'Environment Domain Name', 'String', {
+      persisted: true,
+    }),
+    InputField('groupName', 'Group Name', 'String', {
+      persisted: true,
+    }),
+    InputField('shouldReplaceGroup', 'Replace Group', 'Checkbox', {
+      persisted: true,
+      defaultValue: true,
+    }),
+    InputField('shouldGroupByTags', 'Group By Tags', 'Checkbox', {
+      persisted: true,
+      defaultValue: false,
+    }),
+  ]
 
   /**
    * @property {Object<SwaggerParser.Options>} parserOptions
@@ -44,7 +59,7 @@ export default class OpenAPIv3Importer implements Paw.Importer {
       const doc = this.parseContent(item) as OpenAPIV3.Document
       if (!doc) return 0
       return (
-        doc.openapi.substr(0, 1) === '3.0' && // allowed versions 3.0.x.*
+        doc.openapi.startsWith('3.0') && // allowed versions 3.0.x.*
         typeof doc.info === 'object' &&
         typeof doc.paths === 'object' &&
         Object.keys(doc.paths).length > 0
@@ -69,8 +84,26 @@ export default class OpenAPIv3Importer implements Paw.Importer {
   public import(
     context: Paw.Context,
     items: Paw.ExtensionItem[],
-    options: Paw.ExtensionOption,
+    options: Paw.ExtensionOption<{
+      groupName?: string;
+      shouldReplaceGroup?: boolean;
+      shouldGroupByTags?: boolean;
+      environmentDomainName?: string;
+    }>,
   ): Promise<boolean> {
+    let rootGroup: Paw.RequestGroup | undefined;
+    const groupName = options.inputs?.groupName;
+    if (groupName) {
+      rootGroup = context.getRootGroups().find(x => x.name === groupName)
+      if (rootGroup && options.inputs?.shouldReplaceGroup) {
+        rootGroup.deleteGroup()
+        rootGroup = undefined
+      }
+      if (!rootGroup) {
+        rootGroup = context.createRequestGroup(groupName)
+      }
+    }
+    
     const documents = [...items].map(
       (item: Paw.ExtensionItem): Promise<OpenAPIV3.Document> => {
         const apiParser = new SwaggerParser()
@@ -83,6 +116,10 @@ export default class OpenAPIv3Importer implements Paw.Importer {
             const convertDocument = new PawConverter(
               apiParser,
               filename,
+              item.url ?? undefined,
+              rootGroup,
+              options.inputs?.shouldGroupByTags ?? false,
+              options.inputs?.environmentDomainName,
               context,
             )
             convertDocument.init()

@@ -3,6 +3,7 @@ import Paw from 'types/paw'
 import EnvironmentManager from './environment'
 import { convertEnvString } from './dynamic-values'
 import logger from './console'
+import parseURL from'url';
 
 export interface PawURLOptions {
   openApi: OpenAPIV3.Document
@@ -17,7 +18,6 @@ export default class PawURL {
   public pathname: string
   public port: string
   public fullUrl: string | DynamicString
-  public defaultURL = 'https://echo.paw.cloud'
   constructor(
     pathItem: OpenAPIV3.PathItemObject,
     openApi: OpenAPIV3.Document,
@@ -25,38 +25,31 @@ export default class PawURL {
     envManager: EnvironmentManager,
     request: Paw.Request,
   ) {
-    let baseURL = this.createURL()
-
-    if (pathItem.servers && pathItem.servers.length > 0) {
-      baseURL = this.createURL(pathItem.servers[0].url)
-      logger.log(baseURL.href)
-    }
-
+    const fakeBaseUrlObj = new URL('x://-');
+    let urlObj = fakeBaseUrlObj;
     if (openApi.servers && openApi.servers.length > 0) {
-      baseURL = this.createURL(openApi.servers[0].url)
+      urlObj = appendURL(openApi.servers[0].url, urlObj);
+    }
+    if (pathItem.servers && pathItem.servers.length > 0) {
+      urlObj = appendURL(pathItem.servers[0].url, urlObj);
     }
 
-    baseURL.pathname += pathName
+    urlObj = appendURL(pathName, urlObj);
 
-    if (/^(\/\/)/g.test(baseURL.pathname)) {
-      baseURL.pathname = baseURL.pathname.replace(/^(\/\/)/g, '/')
+    let urlStr = urlObj.href.replace(/%7B/g, '{').replace(/%7D/g, '}')
+    if (urlStr.startsWith(fakeBaseUrlObj.href)) {
+      urlStr = `{Base URL}${urlStr.substring(fakeBaseUrlObj.href.length)}`
     }
 
-    const url = baseURL.href.replace(/%7B/g, '{').replace(/%7D/g, '}') + '/'
-    this.hostname = baseURL.hostname
-    this.pathname = baseURL.pathname
-    this.port = baseURL.port
+    this.hostname = urlObj.hostname
+    this.pathname = urlObj.pathname
+    this.port = urlObj.port
 
-    this.fullUrl = convertEnvString(url, request, envManager) as DynamicString
+    this.fullUrl = convertEnvString(urlStr, request, envManager) as DynamicString
     return this
   }
+}
 
-  public createURL(url?: string): URL {
-    if (!url) return new URL(this.defaultURL)
-    try {
-      return new URL(url)
-    } catch (error) {
-      return new URL(url, this.defaultURL)
-    }
-  }
+function appendURL(url: string, baseUrl: URL) {
+  return new URL(url, baseUrl.href.endsWith('/')? baseUrl.href : `${baseUrl.href}/`)
 }

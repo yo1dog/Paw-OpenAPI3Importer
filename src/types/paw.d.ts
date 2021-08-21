@@ -16,7 +16,7 @@ declare global {
   }
 
   type MapKeyedWithString<T> = { [key: string]: T }
-  type GroupedRequestType = { group: string; path: string }
+  type GroupedRequestType = { group?: string; path: string }
   type CreateRequestGroupType = {
     group: string
     paths: string[]
@@ -84,6 +84,50 @@ declare global {
     token_prefix: string | DynamicString | null | undefined
     grant_type: string | undefined
   }
+  
+  function InputField(key: string, name: string, type?: 'String', options?: {
+    persisted?: boolean;
+    defaultValue?: string;
+    placeholder?: string;
+  }): unknown;
+  function InputField(key: string, name: string, type: 'Number', options?: {
+    persisted?: boolean;
+    defaultValue?: number;
+    placeholder?: string;
+    float?: boolean;
+    minValue: number;
+    maxValue: number;
+  }): unknown;
+  function InputField(key: string, name: string, type: 'SecureValue', options?: {
+    persisted?: boolean;
+    placeholder?: string;
+  }): unknown;
+  function InputField(key: string, name: string, type: 'Request' | 'EnvironmentVariable', options?: {
+    persisted?: boolean;
+  }): unknown;
+  function InputField(key: string, name: string, type: 'Select', options: {
+    choices: string[];
+    persisted?: boolean;
+  }): unknown;
+  function InputField(key: string, name: string, type?: 'Checkbox', options?: {
+    persisted?: boolean;
+    defaultValue?: boolean;
+  }): unknown;
+  function InputField(key: string, name: string, type: 'Radio', options: {
+    choices: string[];
+    persisted?: boolean;
+    defaultValue?: string;
+  }): unknown;
+  function InputField(key: string, name: string, type: 'KeyValueList', options?: {
+    keyName?: string;
+    valueName?: string;
+    persisted?: boolean;
+    defaultValue?: string;
+  }): unknown;
+  function InputField(key: string, name: string, type: 'JSON', options?: {
+    persisted?: boolean;
+    defaultValue?: string;
+  }): unknown;
 }
 
 declare namespace Paw {
@@ -508,8 +552,8 @@ declare namespace Paw {
     path: string
   }
 
-  class ExtensionOption {
-    inputs: { [key: string]: any } | null
+  class ExtensionOption<T = { [key: string]: any }> {
+    inputs: T | null
     file: ExtensionImportFile | null
     hideCredentials: boolean
     parent: RequestTreeItem | null

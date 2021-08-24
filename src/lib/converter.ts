@@ -447,10 +447,7 @@ export default class PawConverter {
       if (item.type === 'http' && item.scheme === 'bearer') {
         request.addHeader(
           'Authorization',
-          new DynamicString(
-            'Bearer ',
-            this.getEnviroment().getDynamicValue(`${item.bearerFormat || 'Auth'} Token`)
-          )
+          this.getEnviroment().getDynamicString('Authorization'),
         )
       }
     })
